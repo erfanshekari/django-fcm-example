@@ -1,3 +1,4 @@
+import logging
 from rest_framework.generics import GenericAPIView
 from rest_framework.response import Response
 from rest_framework.status import (
@@ -5,10 +6,10 @@ from rest_framework.status import (
 )
 from firebase_admin.messaging import (
     MulticastMessage, 
-    send_multicast
+    send_multicast,
+    BatchResponse,
+    Notification
 )
-from django.utils.translation import gettext_lazy as _
-
 from .serializers import PushNotificationSerializer
 
 class PushNotificationView(GenericAPIView):
@@ -20,21 +21,33 @@ class PushNotificationView(GenericAPIView):
             context=self.get_serializer_context()
         )
         if serializer.is_valid():
-            print(serializer.validated_data)
             try:
-                send_multicast(MulticastMessage(
-                tokens=serializer.validated_data['tokens'],
-                data=serializer.validated_data['payload']
-            ))
+                notification = serializer.validated_data.get('notification', None)
+                reseponse: BatchResponse = send_multicast(
+                    MulticastMessage(
+                        tokens=serializer.validated_data['tokens'],
+                        data=serializer.validated_data.get('data', None),
+                        notification=Notification(
+                            title=notification.get('title', None),
+                            body=notification.get('body', None),
+                            image=notification.get('image', None),
+                        ) if notification else None
+                    )
+                )
+                return Response(
+                    data={
+                        'success_count': reseponse.success_count,
+                        'failure_count': reseponse.failure_count,
+                    }
+                )
             except Exception as exc:
-                print(exc)
+                logging.debug(exc)
                 return Response(
                     status=HTTP_400_BAD_REQUEST,
                     data={
-                        'error': _('Unable to push notification!')
+                        'error': str(exc)
                     }
                 )
-            return Response()
         else:
             return Response(
                 status=HTTP_400_BAD_REQUEST,
